@@ -9,7 +9,7 @@ require 'RMagick'
 
 # proporation of the image which is considered a valid size for a word or letter
 # ex. a 1200x1600 image would discard any regions smaller than 96 pixels with MIN_VALID_AREA=0.00005
-MIN_VALID_AREA = 0.00015
+MIN_VALID_AREA = 0.0000002
 
 image_filename = ARGV[0]
 @hocr_filename = ARGV[1]
@@ -69,7 +69,9 @@ class Rectangle
 end
 
 
-def draw_rectangle(start_x,start_y,end_x,end_y, color, strength, text=nil)
+def draw_rectangle(start_x,start_y,end_x,end_y, color, strength, text=nil, caller='dump')
+    #MJC (10/2013): added caller parm to indicate where this function is called from
+    #               so that I can better control how the text is displayed based on caller.
   gc = Magick::Draw.new
 
   
@@ -87,8 +89,19 @@ def draw_rectangle(start_x,start_y,end_x,end_y, color, strength, text=nil)
   gc.line(end_x, start_y, end_x, end_y)
 
   if text && text.length > 0
-    gc.stroke_width(1)
-    gc.text(start_x, start_y, text) 
+      #MCJ (10/2013): text sent by dump is displayed within the box
+      #               text sent by parent is displayed to left of the box
+      if caller=='dump'
+          gc.stroke_width(2)
+          gc.pointsize(18)
+          gc.stroke("orange")
+          gc.text(start_x+5, start_y+15, text)
+      elsif caller=='parent'
+            gc.stroke_width(2)
+            gc.pointsize(14)
+            gc.stroke("orange")
+            gc.text(start_x-60, start_y+10, text)
+      end
 
   end
   # # Annotate
@@ -111,16 +124,17 @@ def coords_from_element(e)
 end
 
 
-def rectangle_from_element(e, color, strength)
+def rectangle_from_element(e, color, strength, text)
   coords = coords_from_element(e)
   # titles all begin with 'bbox', which we ignore
 #  draw_rectangle(coords[0],coords[1],coords[2],coords[3], color, strength, e.text)      
-  draw_rectangle(coords[0],coords[1],coords[2],coords[3], color, strength)      
+  draw_rectangle(coords[0],coords[1],coords[2],coords[3], color, strength, text, 'parent')
 end
 
 def traverse_parents(e) 
   parent = e.parent
-#  rectangle_from_element(parent, 'red', 3)
+  #MJC (10/2013): uncomment out to display ocr_line boxes
+  rectangle_from_element(parent, 'red', 3, e.parent['id'])
 
   grandparent = parent.parent
 #  rectangle_from_element(parent, 'red', 5)
@@ -155,8 +169,8 @@ end
 
 
 def dump_rectangles
-  @rectangle_list.each do |r|
-    draw_rectangle(r.min_x, r.min_y, r.max_x, r.max_y, 'blue', 3, r.to_s)  
+  @rectangle_list.each_with_index do |r, index|
+    draw_rectangle(r.min_x, r.min_y, r.max_x, r.max_y, 'blue', 3, "#{index}", 'dump')
     
   end
 end
@@ -206,7 +220,7 @@ end
 
 
 def valid_ocr?(e)
-  likely_text = e.text =~ /\w\w\w/ || e.text =~ /\w\.$/ || e.text =~ /^\w$/
+  likely_text = e.text =~ /\w\w/ || e.text =~ /\w\.$/ || e.text =~ /^\w$/
   coords = coords_from_element(e)
   
   width = coords[2] - coords[0]
@@ -214,7 +228,7 @@ def valid_ocr?(e)
   
   area = width * height
   likely_area = area > (@cols * @rows * MIN_VALID_AREA)
-#  print "#{likely_area}==#{area} > (#{@cols} * #{@rows} * #{MIN_VALID_AREA})(==#{(@cols * @rows * MIN_VALID_AREA)})\n"  
+  # print "#{e['id']}: #{likely_area}==#{area} > (#{@cols} * #{@rows} * #{MIN_VALID_AREA})(==#{(@cols * @rows * MIN_VALID_AREA)})\n"
   likely_text && likely_area
 end
 
@@ -222,9 +236,8 @@ def process_hocr
   page = Nokogiri::HTML(open(@hocr_filename), nil, 'iso-8859-1')
   
   
-  word_spans = page.xpath('//span[@class="ocr_word"]')
+  word_spans = page.xpath('//span[@class="ocrx_word"]')
   word_spans.each do |e|
-
     if valid_ocr?(e) 
       # p 'FOUND WORDS'
 #      rectangle_from_element(e, 'green', 3)
@@ -307,8 +320,8 @@ end
 
 
 process_hocr
-postprocess_rectangles
+#postprocess_rectangles
 dump_rectangles
 @image.write(@out_filename)      
-good_rectangles = extract_rectangles
-ocr_crops(good_rectangles)
+#good_rectangles = extract_rectangles
+#ocr_crops(good_rectangles)
